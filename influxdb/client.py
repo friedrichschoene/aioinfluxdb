@@ -6,6 +6,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import asyncio
 import datetime
 import gzip
 import itertools
@@ -14,12 +15,10 @@ import json
 import random
 import socket
 import struct
-import time
 from itertools import chain, islice
 
+import aiohttp
 import msgpack
-import requests
-import requests.exceptions
 from six.moves.urllib.parse import urlparse
 
 from influxdb.line_protocol import make_lines, quote_ident, quote_literal
@@ -82,8 +81,8 @@ class InfluxDBClient(object):
     :param gzip: use gzip content encoding to compress requests
     :type gzip: bool
     :param session: allow for the new client request to use an existing
-        requests Session, defaults to None
-    :type session: requests.Session
+        aiohttp ClientSession, defaults to None
+    :type session: aiohttp.ClientSession
     :param headers: headers to add to Requests, will add 'Content-Type'
         and 'Accept' unless these are already present, defaults to {}
     :type headers: dict
@@ -125,13 +124,10 @@ class InfluxDBClient(object):
         self.__udp_port = int(udp_port)
 
         if not session:
-            session = requests.Session()
+            conn = aiohttp.TCPConnector(limit=int(pool_size))
+            session = aiohttp.ClientSession(connector=conn, headers=headers)
 
         self._session = session
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=int(pool_size),
-            pool_maxsize=int(pool_size)
-        )
 
         if use_udp:
             self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -148,7 +144,8 @@ class InfluxDBClient(object):
         if ssl is True:
             self._scheme = "https"
 
-        self._session.mount(self._scheme + '://', adapter)
+        # TODO: substitude this
+        # self._session.mount(self._scheme + '://')
 
         if proxies is None:
             self._proxies = {}
@@ -161,7 +158,8 @@ class InfluxDBClient(object):
                     "Client certificate provided but ssl is disabled."
                 )
             else:
-                self._session.cert = cert
+                # TODO: substitude this
+                # self._session.cert = cert
 
         self.__baseurl = "{0}://{1}:{2}{3}".format(
             self._scheme,
@@ -269,7 +267,7 @@ class InfluxDBClient(object):
         self._username = username
         self._password = password
 
-    def request(self, url, method='GET', params=None, data=None, stream=False,
+    async def request(self, url, method='GET', params=None, data=None, stream=False,
                 expected_response_code=200, headers=None):
         """Make a HTTP request to the InfluxDB API.
 
@@ -289,7 +287,7 @@ class InfluxDBClient(object):
         :param headers: headers to add to the request
         :type headers: dict
         :returns: the response from the request
-        :rtype: :class:`requests.Response`
+        :rtype: :class:`aiohttp.ClientResponse`
         :raises InfluxDBServerError: if the response code is any server error
             code (5xx)
         :raises InfluxDBClientError: if the response code is not the
@@ -328,7 +326,7 @@ class InfluxDBClient(object):
         _try = 0
         while retry:
             try:
-                response = self._session.request(
+                await with self._session.request(
                     method=method,
                     url=url,
                     auth=(self._username, self._password),
@@ -339,18 +337,18 @@ class InfluxDBClient(object):
                     proxies=self._proxies,
                     verify=self._verify_ssl,
                     timeout=self._timeout
-                )
+                ) as request_response:
+                    response = request_response
                 break
-            except (requests.exceptions.ConnectionError,
-                    requests.exceptions.HTTPError,
-                    requests.exceptions.Timeout):
+            # TODO: maybe more errors
+            except (aiohttp.ClientConnectionError, ):
                 _try += 1
                 if self._retries != 0:
                     retry = _try < self._retries
                 if not retry:
                     raise
                 if method == "POST":
-                    time.sleep((2 ** _try) * random.random() / 100.0)
+                    asyncio.sleep((2 ** _try) * random.random() / 100.0)
 
         type_header = response.headers and response.headers.get("Content-Type")
         if type_header == "application/x-msgpack" and response.content:
@@ -1186,10 +1184,10 @@ class InfluxDBClient(object):
             data = ('\n'.join(packet) + '\n').encode('utf-8')
         self.udp_socket.sendto(data, (self._host, self._udp_port))
 
-    def close(self):
+    async def close(self):
         """Close http session."""
-        if isinstance(self._session, requests.Session):
-            self._session.close()
+        if isinstance(self._session, aiohttp.ClientSession):
+            await self._session.close()
 
 
 def _parse_dsn(dsn):
