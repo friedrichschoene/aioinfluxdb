@@ -327,7 +327,7 @@ class InfluxDBClient(object):
         _try = 0
         while retry:
             try:
-                await with self._session.request(
+                async with self._session.request(
                     method=method,
                     url=url,
                     auth=(self._username, self._password),
