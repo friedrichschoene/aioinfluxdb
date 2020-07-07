@@ -1,3 +1,12 @@
+aioinfluxdb - Async InfluxDB Client
+====
+
+*This is a fork of https://github.com/influxdata/influxdb-python rewritten to work with aiohttp.*
+
+The aim of this project is to have a non blocking API for InfluxDB with the same functionality as the original library.
+
+----
+
 InfluxDB-Python
 ===============
 
