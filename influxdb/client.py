@@ -160,6 +160,7 @@ class InfluxDBClient(object):
             else:
                 # TODO: substitude this
                 # self._session.cert = cert
+                pass
 
         self.__baseurl = "{0}://{1}:{2}{3}".format(
             self._scheme,
